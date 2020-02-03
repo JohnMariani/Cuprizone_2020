@@ -3,12 +3,6 @@ Bulk RNA-Seq Analysis of Control and Remyelinating hGPCs in vivo
 John Mariani
 1/30/2020
 
-<style>
-    body .main-container {
-        max-width: 1500px;
-    }
-</style>
-
 ### Read in RSEM gene output
 
 ``` r
@@ -229,22 +223,10 @@ dds36 <- DESeqDataSetFromTximport(txi.rsem, sampleTableFull, ~group)
     ## using counts and average transcript lengths from tximport
 
 ``` r
-dds36 <- DESeq(dds36, betaPrior =T)
+dds36 <- estimateSizeFactors(dds36)
 ```
 
-    ## estimating size factors
-
     ## using 'avgTxLength' from assays(dds), correcting for library size
-
-    ## estimating dispersions
-
-    ## gene-wise dispersion estimates
-
-    ## mean-dispersion relationship
-
-    ## final dispersion estimates
-
-    ## fitting model and testing
 
 ``` r
 counts <- as.matrix(counts(dds36, normalized=TRUE))
@@ -297,6 +279,8 @@ cupVsctrW <- deRUV(c("group","Cup.36", "Ctr.36"))
 TPMhigh <- data.frame(row.names= TPM$Row.names, ctrMeans = rowMeans(TPM[,2:7]), ctrMedians = rowMedians(as.matrix(TPM[,2:7])), cupMeans = rowMeans(TPM[,8:13]), cupMedians = rowMedians(as.matrix(TPM[,8:13])))
 TPMhigh <- merge(TPMhigh, ensemblGeneListH, by.x = 0, by.y = "ensembl_gene_id")
 TPMhigh <- TPMhigh[TPMhigh$ctrMeans > 6.5 | TPMhigh$cupMeans > 6.5,]
+
+#Filter out low abundance genes in DE list
 cupVsctrWtpm <- cupVsctrW[cupVsctrW$Row.names %in% TPMhigh$Row.names,]
 nrow(cupVsctrWtpm)
 ```
@@ -304,21 +288,32 @@ nrow(cupVsctrWtpm)
     ## [1] 914
 
 ``` r
+#write.csv(cupVsctrWtpm, cupVsctrWtpm)
+```
+
+### PCA
+
+``` r
 #Make PCA from RUV Normalized Counts
-pcaDF <- as.data.frame(log2(cpm(s@assayData$normalizedCounts)+1))
+pcaDF <- as.data.frame(log2(s@assayData$normalizedCounts+.5))
+
 pcaDFTPM <- pcaDF[row.names(pcaDF) %in% TPMhigh$Row.names,]
 
 condition_colors <- c(rep("blue",6),rep("red",6))
-p <- autoplot(prcomp(t(pcaDFTPM)), xlim = c(-.5, 1), ylim = c(-1,.5), x = 1, y =2 , size = 2) 
+p <- autoplot(prcomp(t(pcaDFTPM)), xlim = c(-.5, 1.5), ylim = c(-1,.5), x = 1, y =2 , size = 2) 
 p + theme_bw() + theme(panel.grid.major = element_line(colour = "grey")) + geom_point(colour = condition_colors, stroke =.2)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
-### Make Marker HM
+### Celltype Marker Heatmap
 
 ``` r
 CNSgenes <- read.csv("data_for_import/CNSgenesCup.csv")
+pcaDF <- as.data.frame(log2(TPM[,2:13]+.5))
+row.names(pcaDF) <- TPM$Row.names
+pcaDFTPM <- pcaDF[row.names(pcaDF) %in% TPMhigh$Row.names,]
+
 CNSgeneslog <- merge(pcaDF,ensemblGeneListH,by.x=0,by.y="ensembl_gene_id")
 CNSgeneslog <- merge(CNSgenes,CNSgeneslog,by.x=1,by.y="external_gene_name")
 CNSgeneslog <- CNSgeneslog[match(CNSgenes$Gene, CNSgeneslog$Gene),]
@@ -327,36 +322,30 @@ my_palette <- colorRampPalette(c("#009900","#fffcbd","#ff2020"))(n=299)
 pheatmap(sigCNSlog, border_color = "Black", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette, labels_col = c(rep("",12)), gaps_col = 6)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
-### Make Functional and Module Organized HMs of DE genes
+### Make Functional and Module Organized Heatmaps of DE genes
 
 ``` r
 #Import genes for HMs labeled with relevant info
 pathways <- read.csv("data_for_import/CupFinalPathways.csv")
 
-sigsMatrixLog <- as.matrix(log2(cpm(s@assayData$normalizedCounts)+1))
-sigsDFlog <- data.frame(sigsMatrixLog)
-sigsDFlog <- merge(sigsDFlog,ensemblGeneListH,by.x=0,by.y="ensembl_gene_id")
-
 pathwaysDF <- as.data.frame(pathways$Gene)
-pathwaysDF <- merge(pathwaysDF, sigsDFlog, by.x = 1, by.y = "external_gene_name")
+pathwaysDF <- merge(pathwaysDF, TPM, by.x = 1, by.y = "external_gene_name")
 pathwaysDF <- data.frame(row.names = pathwaysDF$`pathways$Gene`, pathwaysDF[,3:14])
 annotations <- data.frame(row.names = pathways$Gene, Module = pathways$Module)
 
 mat_colors <- list(Module = c("#57bc9a", "#dd50dd", "#d78737", "#1b474a"))
 
 breaks <- seq(from = -3, to = 3, length.out = 299)
-makeHM <- function(df, category){
-  temp <-  as.data.frame(category$Gene)
-  temp <- merge(df, sigsDFlog, by.x = 0, by.y = "external_gene_name")
-  temp <- data.frame(row.names = temp$Row.names, temp[,2:13])
-  temp <- temp[row.names(temp) %in% category$Gene,]
+makeHM <- function(category){
+  temp <- TPM[TPM$external_gene_name %in% category$Gene,]
+  temp <- data.frame(row.names = temp$external_gene_name, temp[,2:13])
   annotations <- data.frame(row.names = category$Gene, Module = category$Module)
   annotations <- annotations[order(annotations$Module,decreasing = F),, drop = F]
   temp <- temp[match(row.names(annotations), row.names(temp)),]
-  pheatmap(temp, border_color = "Black", scale = "row", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette,  labels_col = c(rep("",12)), gaps_col = 6, cellwidth = 10, cellheight = 10, annotation_row = annotations, annotation_colors = mat_colors, breaks = breaks, annotation_legend = T, legend = T, annotation_names_row = F, main = unique(category$Category))
-}  
+  pheatmap(log2(temp+.5), border_color = "Black", scale = "row", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette,  labels_col = c(rep("",12)), gaps_col = 6, cellwidth = 10, cellheight = 10, annotation_row = annotations, annotation_colors = mat_colors, breaks = breaks, annotation_legend = T, legend = T, annotation_names_row = F, main = unique(category$Category))
+}
 
 adhesion <- pathways[pathways$Category == "Cell Adhesion and Structural Proteins",]
 channels <- pathways[pathways$Category == "Channels and Transporters",]
@@ -366,46 +355,65 @@ ligands <- pathways[pathways$Category == "Ligands and Secreted Proteins",]
 receptors <- pathways[pathways$Category == "Receptors and Downstream Components",]
 tfs  <-  pathways[pathways$Category == "Transcriptional Regulators",]  
 
-makeHM(pathwaysDF, adhesion)  
+makeHM(adhesion)  
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,channels) 
+makeHM(channels) 
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-2.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-2.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,enzymes)
+makeHM(enzymes)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-3.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-3.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,kinases)
+makeHM(kinases)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-4.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-4.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,ligands)
+makeHM(ligands)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-5.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-5.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,receptors)
+makeHM(receptors)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-6.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-6.png)<!-- -->
 
 ``` r
-makeHM(pathwaysDF,tfs)
+makeHM(tfs)
 ```
 
-![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-7.png)<!-- -->
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-7.png)<!-- -->
+
+### Make GO Bar plot
+
+``` r
+### Import Module information and filter
+GOterms <- read.delim("data_for_import/GOmodules.txt")
+GOterms <- GOterms[GOterms$ForGraph == "Yes",]
+GOterms$GO.Annotation <- droplevels(GOterms$GO.Annotation)
+GOterms$GO.Annotation <- factor(GOterms$GO.Annotation, levels = rev(GOterms$GO.Annotation))
+GOterms$Module <- factor(GOterms$Module)
+
+attach(GOterms)
+ggplot(GOterms, aes(fill=Module, x=GO.Annotation, y=X.log10.pvalue.)) + 
+  geom_bar(position="dodge", stat="identity") + coord_flip() +
+  ylab("Adjusted p-value (-log10)") + scale_y_continuous(expand = c(0, 0)) +
+  xlab("GO Terms") + theme_minimal() + scale_fill_manual("Module", values = c("1" = mat_colors$Module[1], "2" = mat_colors$Module[2], "3" = mat_colors$Module[3], "4" = mat_colors$Module[4]))
+```
+
+![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ### Session Info
 
@@ -415,7 +423,7 @@ sessionInfo()
 
     ## R version 3.6.1 (2019-07-05)
     ## Platform: x86_64-apple-darwin15.6.0 (64-bit)
-    ## Running under: macOS Mojave 10.14.6
+    ## Running under: macOS High Sierra 10.13.6
     ## 
     ## Matrix products: default
     ## BLAS:   /Library/Frameworks/R.framework/Versions/3.6/Resources/lib/libRblas.0.dylib
@@ -447,28 +455,28 @@ sessionInfo()
     ##  [1] bitops_1.0-6           bit64_0.9-7            RColorBrewer_1.1-2    
     ##  [4] progress_1.2.2         httr_1.4.1             tools_3.6.1           
     ##  [7] backports_1.1.5        R6_2.4.1               rpart_4.1-15          
-    ## [10] Hmisc_4.3-0            DBI_1.0.0              lazyeval_0.2.2        
+    ## [10] Hmisc_4.3-0            DBI_1.1.0              lazyeval_0.2.2        
     ## [13] colorspace_1.4-1       nnet_7.3-12            withr_2.1.2           
     ## [16] gridExtra_2.3          tidyselect_0.2.5       prettyunits_1.0.2     
-    ## [19] bit_1.1-14             compiler_3.6.1         htmlTable_1.13.3      
+    ## [19] bit_1.1-14             compiler_3.6.1         htmlTable_1.13.2      
     ## [22] labeling_0.3           rtracklayer_1.44.4     checkmate_1.9.4       
     ## [25] scales_1.1.0           genefilter_1.66.0      DESeq_1.36.0          
     ## [28] stringr_1.4.0          digest_0.6.23          foreign_0.8-72        
-    ## [31] rmarkdown_2.0          R.utils_2.9.0          base64enc_0.1-3       
+    ## [31] rmarkdown_1.18         R.utils_2.9.2          base64enc_0.1-3       
     ## [34] pkgconfig_2.0.3        htmltools_0.4.0        htmlwidgets_1.5.1     
-    ## [37] rlang_0.4.2            rstudioapi_0.10        RSQLite_2.1.4         
+    ## [37] rlang_0.4.2            rstudioapi_0.10        RSQLite_2.1.5         
     ## [40] farver_2.0.1           hwriter_1.3.2          acepack_1.4.1         
     ## [43] dplyr_0.8.3            R.oo_1.23.0            RCurl_1.95-4.12       
     ## [46] magrittr_1.5           GenomeInfoDbData_1.2.1 Formula_1.2-3         
     ## [49] Matrix_1.2-18          Rcpp_1.0.3             munsell_0.5.0         
-    ## [52] lifecycle_0.1.0        R.methodsS3_1.7.1      stringi_1.4.5         
+    ## [52] lifecycle_0.1.0        R.methodsS3_1.7.1      stringi_1.4.3         
     ## [55] yaml_2.2.0             MASS_7.3-51.4          zlibbioc_1.30.0       
     ## [58] grid_3.6.1             blob_1.2.0             crayon_1.3.4          
     ## [61] lattice_0.20-38        splines_3.6.1          GenomicFeatures_1.36.4
     ## [64] annotate_1.62.0        hms_0.5.2              locfit_1.5-9.1        
     ## [67] zeallot_0.1.0          knitr_1.26             pillar_1.4.3          
     ## [70] geneplotter_1.62.0     XML_3.98-1.20          glue_1.3.1            
-    ## [73] evaluate_0.14          latticeExtra_0.6-28    data.table_1.12.6     
+    ## [73] evaluate_0.14          latticeExtra_0.6-28    data.table_1.12.8     
     ## [76] vctrs_0.2.1            tidyr_1.0.0            gtable_0.3.0          
     ## [79] purrr_0.3.3            assertthat_0.2.1       xfun_0.11             
     ## [82] aroma.light_3.14.0     xtable_1.8-4           survival_3.1-7        

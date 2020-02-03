@@ -4,21 +4,15 @@ author: "John Mariani"
 date: "1/30/2020"
 output: 
   github_document:
-    toc: TRUE
+   toc: TRUE
 ---
-
-<style>
-    body .main-container {
-        max-width: 1500px;
-    }
-</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ### Read in RSEM gene output
-```{R}
+```{R, echo = TRUE, message = FALSE, warning = FALSE}
 library(tximport)
 library(readr)
 library(biomaRt)
@@ -103,7 +97,7 @@ txi.rsem$counts <- dataWithin@assayData$normalizedCounts
 ```{R}
 # Get Normalized Counts from DESeq2
 dds36 <- DESeqDataSetFromTximport(txi.rsem, sampleTableFull, ~group)
-dds36 <- DESeq(dds36, betaPrior =T)
+dds36 <- estimateSizeFactors(dds36)
 counts <- as.matrix(counts(dds36, normalized=TRUE))
 
 #Generate RUVSeq covariate using RUVs
@@ -131,57 +125,63 @@ cupVsctrW <- deRUV(c("group","Cup.36", "Ctr.36"))
 TPMhigh <- data.frame(row.names= TPM$Row.names, ctrMeans = rowMeans(TPM[,2:7]), ctrMedians = rowMedians(as.matrix(TPM[,2:7])), cupMeans = rowMeans(TPM[,8:13]), cupMedians = rowMedians(as.matrix(TPM[,8:13])))
 TPMhigh <- merge(TPMhigh, ensemblGeneListH, by.x = 0, by.y = "ensembl_gene_id")
 TPMhigh <- TPMhigh[TPMhigh$ctrMeans > 6.5 | TPMhigh$cupMeans > 6.5,]
+
+#Filter out low abundance genes in DE list
 cupVsctrWtpm <- cupVsctrW[cupVsctrW$Row.names %in% TPMhigh$Row.names,]
 nrow(cupVsctrWtpm)
+#write.csv(cupVsctrWtpm, cupVsctrWtpm)
+```
 
+### PCA
+```{R}
 #Make PCA from RUV Normalized Counts
-pcaDF <- as.data.frame(log2(cpm(s@assayData$normalizedCounts)+1))
+pcaDF <- as.data.frame(log2(s@assayData$normalizedCounts+.5))
+
 pcaDFTPM <- pcaDF[row.names(pcaDF) %in% TPMhigh$Row.names,]
 
 condition_colors <- c(rep("blue",6),rep("red",6))
-p <- autoplot(prcomp(t(pcaDFTPM)), xlim = c(-.5, 1), ylim = c(-1,.5), x = 1, y =2 , size = 2) 
+p <- autoplot(prcomp(t(pcaDFTPM)), xlim = c(-.5, 1.5), ylim = c(-1,.5), x = 1, y =2 , size = 2) 
 p + theme_bw() + theme(panel.grid.major = element_line(colour = "grey")) + geom_point(colour = condition_colors, stroke =.2)
 ```
-
-### Make Marker HM
+ 
+### Celltype Marker Heatmap
 ```{R}
 CNSgenes <- read.csv("data_for_import/CNSgenesCup.csv")
+pcaDF <- as.data.frame(log2(TPM[,2:13]+.5))
+row.names(pcaDF) <- TPM$Row.names
+pcaDFTPM <- pcaDF[row.names(pcaDF) %in% TPMhigh$Row.names,]
+
 CNSgeneslog <- merge(pcaDF,ensemblGeneListH,by.x=0,by.y="ensembl_gene_id")
 CNSgeneslog <- merge(CNSgenes,CNSgeneslog,by.x=1,by.y="external_gene_name")
 CNSgeneslog <- CNSgeneslog[match(CNSgenes$Gene, CNSgeneslog$Gene),]
 sigCNSlog <- data.frame(row.names = paste0(CNSgeneslog$Gene," (",CNSgeneslog$Lineage,")"), CNSgeneslog [,4:15])
 my_palette <- colorRampPalette(c("#009900","#fffcbd","#ff2020"))(n=299)
 pheatmap(sigCNSlog, border_color = "Black", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette, labels_col = c(rep("",12)), gaps_col = 6)
+
 ```
 
-### Make Functional and Module Organized HMs of DE genes
+### Make Functional and Module Organized Heatmaps of DE genes
 
 ```{R}
 #Import genes for HMs labeled with relevant info
 pathways <- read.csv("data_for_import/CupFinalPathways.csv")
 
-sigsMatrixLog <- as.matrix(log2(cpm(s@assayData$normalizedCounts)+1))
-sigsDFlog <- data.frame(sigsMatrixLog)
-sigsDFlog <- merge(sigsDFlog,ensemblGeneListH,by.x=0,by.y="ensembl_gene_id")
-
 pathwaysDF <- as.data.frame(pathways$Gene)
-pathwaysDF <- merge(pathwaysDF, sigsDFlog, by.x = 1, by.y = "external_gene_name")
+pathwaysDF <- merge(pathwaysDF, TPM, by.x = 1, by.y = "external_gene_name")
 pathwaysDF <- data.frame(row.names = pathwaysDF$`pathways$Gene`, pathwaysDF[,3:14])
 annotations <- data.frame(row.names = pathways$Gene, Module = pathways$Module)
 
 mat_colors <- list(Module = c("#57bc9a", "#dd50dd", "#d78737", "#1b474a"))
 
 breaks <- seq(from = -3, to = 3, length.out = 299)
-makeHM <- function(df, category){
-  temp <-  as.data.frame(category$Gene)
-  temp <- merge(df, sigsDFlog, by.x = 0, by.y = "external_gene_name")
-  temp <- data.frame(row.names = temp$Row.names, temp[,2:13])
-  temp <- temp[row.names(temp) %in% category$Gene,]
+makeHM <- function(category){
+  temp <- TPM[TPM$external_gene_name %in% category$Gene,]
+  temp <- data.frame(row.names = temp$external_gene_name, temp[,2:13])
   annotations <- data.frame(row.names = category$Gene, Module = category$Module)
   annotations <- annotations[order(annotations$Module,decreasing = F),, drop = F]
   temp <- temp[match(row.names(annotations), row.names(temp)),]
-  pheatmap(temp, border_color = "Black", scale = "row", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette,  labels_col = c(rep("",12)), gaps_col = 6, cellwidth = 10, cellheight = 10, annotation_row = annotations, annotation_colors = mat_colors, breaks = breaks, annotation_legend = T, legend = T, annotation_names_row = F, main = unique(category$Category))
-}  
+  pheatmap(log2(temp+.5), border_color = "Black", scale = "row", cluster_row = FALSE, cluster_cols = FALSE, color = my_palette,  labels_col = c(rep("",12)), gaps_col = 6, cellwidth = 10, cellheight = 10, annotation_row = annotations, annotation_colors = mat_colors, breaks = breaks, annotation_legend = T, legend = T, annotation_names_row = F, main = unique(category$Category))
+}
 
 adhesion <- pathways[pathways$Category == "Cell Adhesion and Structural Proteins",]
 channels <- pathways[pathways$Category == "Channels and Transporters",]
@@ -191,14 +191,30 @@ ligands <- pathways[pathways$Category == "Ligands and Secreted Proteins",]
 receptors <- pathways[pathways$Category == "Receptors and Downstream Components",]
 tfs  <-  pathways[pathways$Category == "Transcriptional Regulators",]  
 
-makeHM(pathwaysDF, adhesion)  
-makeHM(pathwaysDF,channels) 
-makeHM(pathwaysDF,enzymes)
-makeHM(pathwaysDF,kinases)
-makeHM(pathwaysDF,ligands)
-makeHM(pathwaysDF,receptors)
-makeHM(pathwaysDF,tfs)
+makeHM(adhesion)  
+makeHM(channels) 
+makeHM(enzymes)
+makeHM(kinases)
+makeHM(ligands)
+makeHM(receptors)
+makeHM(tfs)
 
+```
+
+### Make GO Bar plot
+```{R}
+### Import Module information and filter
+GOterms <- read.delim("data_for_import/GOmodules.txt")
+GOterms <- GOterms[GOterms$ForGraph == "Yes",]
+GOterms$GO.Annotation <- droplevels(GOterms$GO.Annotation)
+GOterms$GO.Annotation <- factor(GOterms$GO.Annotation, levels = rev(GOterms$GO.Annotation))
+GOterms$Module <- factor(GOterms$Module)
+
+attach(GOterms)
+ggplot(GOterms, aes(fill=Module, x=GO.Annotation, y=X.log10.pvalue.)) + 
+  geom_bar(position="dodge", stat="identity") + coord_flip() +
+  ylab("Adjusted p-value (-log10)") + scale_y_continuous(expand = c(0, 0)) +
+  xlab("GO Terms") + theme_minimal() + scale_fill_manual("Module", values = c("1" = mat_colors$Module[1], "2" = mat_colors$Module[2], "3" = mat_colors$Module[3], "4" = mat_colors$Module[4]))
 ```
 
 ### Session Info
