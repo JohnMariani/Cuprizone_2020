@@ -3,7 +3,7 @@ Bulk RNA-Seq Analysis of Control and Remyelinating hGPCs in vivo
 John Mariani
 1/30/2020
 
-### Read in RSEM gene output
+## Read in RSEM gene output
 
 ``` r
 library(tximport)
@@ -30,7 +30,7 @@ txi.rsem <- readRDS("data_for_import/tximport_RSEM.rds")
 ## Read in gene information from biomaRt
 
 Grab gene information from biomaRt if you don’t already have it in the
-RSEM\_ folder
+data\_for\_import folder. Data were aligned to Ensembl 92
 
 ``` r
 #Create a dataframe of gene abundance estimates
@@ -45,7 +45,7 @@ if(file.exists(ensemblFilename)){
   }
 ```
 
-### Create design and prep for EDA-Seq
+## Create design and prep for EDA-Seq
 
 ``` r
 #Experimental design for Control (CTR) and 12 week post-cuprizone (CUP) CD140+ hGPC samples
@@ -73,7 +73,7 @@ txi.rsem$abundance <- txi.rsem$abundance[row.names(txi.rsem$abundance) %in% row.
 ensemblGeneListH <- ensemblGeneListH[match(row.names(txi.rsem$counts), ensemblGeneListH$ensembl_gene_id),]
 ```
 
-### GC Bias removal with EDASeq
+## GC Bias removal with EDASeq
 
 ``` r
 #Create dataframe to be used for EDASeq with sanity checks
@@ -81,6 +81,7 @@ uCovar <- data.frame(row.names = ensemblGeneListH$ensembl_gene_id, gccontent = e
 uCovar <- uCovar[row.names(uCovar) %in% row.names(txi.rsem$counts),, drop = F]
 uCovar <- uCovar[match(row.names(txi.rsem$counts), row.names(uCovar)),, drop = F]
 
+#Adjust for GC bias
 roundedCounts <- as.matrix(round(txi.rsem$counts,0))
 eda <- newSeqExpressionSet(roundedCounts,featureData=uCovar, phenoData=data.frame(group = sampleTableFull$group, row.names = row.names(sampleTableFull)))
 dataWithin <- withinLaneNormalization(eda,"gccontent", which="full")
@@ -89,7 +90,7 @@ dataWithin <- withinLaneNormalization(eda,"gccontent", which="full")
 txi.rsem$counts <- dataWithin@assayData$normalizedCounts
 ```
 
-### Removal of Unwanted Variance via RUVSeq
+## Removal of Unwanted Variance via RUVSeq
 
 ``` r
 # Get Normalized Counts from DESeq2
@@ -115,9 +116,10 @@ s <- RUVs(forRUVs,genes,k=1,differences)
 sampleDataW <- pData(s)
 ```
 
-### Differential Expression in DESeq2
+## Differential Expression in DESeq2
 
 ``` r
+#Differential Expression between CTR and CUP with addition of RUVseq Covariate
 ddsW <- DESeqDataSetFromTximport(txi.rsem, sampleDataW, design = ~group + W_1)
 ```
 
@@ -148,7 +150,6 @@ deRUV <- function(cont){
   return(temp[temp$padj < 0.05 & complete.cases(temp ==T),])
 }
 
-
 cupVsctrW <- deRUV(c("group","Cup.36", "Ctr.36"))
 
 # Remove low abundance genes for further analysis
@@ -156,7 +157,6 @@ TPMhigh <- data.frame(row.names= TPM$Row.names, ctrMeans = rowMeans(TPM[,2:7]), 
 TPMhigh <- merge(TPMhigh, ensemblGeneListH, by.x = 0, by.y = "ensembl_gene_id")
 TPMhigh <- TPMhigh[TPMhigh$ctrMeans > 6.5 | TPMhigh$cupMeans > 6.5,]
 
-#Filter out low abundance genes in DE list
 cupVsctrWtpm <- cupVsctrW[cupVsctrW$Row.names %in% TPMhigh$Row.names,]
 nrow(cupVsctrWtpm)
 ```
@@ -164,10 +164,10 @@ nrow(cupVsctrWtpm)
     ## [1] 914
 
 ``` r
-#write.csv(cupVsctrWtpm, cupVsctrWtpm)
+#write.csv(cupVsctrWtpm, "cupVsctrWtpm.csv")
 ```
 
-### PCA
+## PCA
 
 ``` r
 #Make PCA from RUV Normalized Counts
@@ -182,9 +182,10 @@ p + theme_bw() + theme(panel.grid.major = element_line(colour = "grey")) + geom_
 
 ![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
-### Celltype Marker Heatmap
+## Celltype Marker Heatmap
 
 ``` r
+#Create HM of marker genes using log2 TPM plus a half pseudocount
 CNSgenes <- read.csv("data_for_import/CNSgenesCup.csv")
 pcaDF <- as.data.frame(log2(TPM[,2:13]+.5))
 row.names(pcaDF) <- TPM$Row.names
@@ -200,7 +201,9 @@ pheatmap(sigCNSlog, border_color = "Black", cluster_row = FALSE, cluster_cols = 
 
 ![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
-### Make Functional and Module Organized Heatmaps of DE genes
+## Make Functional and Module Organized Heatmaps of DE genes
+
+Modules were determined in Gephi. GO analysis was conducted in IPA
 
 ``` r
 #Import genes for HMs labeled with relevant info
@@ -272,7 +275,7 @@ makeHM(tfs)
 
 ![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-9-7.png)<!-- -->
 
-### Make GO Bar plot
+## Make GO Bar plot
 
 ``` r
 ### Import Module information and filter
@@ -291,7 +294,7 @@ ggplot(GOterms, aes(fill=Module, x=GO.Annotation, y=X.log10.pvalue.)) +
 
 ![](Cuprizone_Analysis_2020_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
-### Session Info
+## Session Info
 
 ``` r
 sessionInfo()
