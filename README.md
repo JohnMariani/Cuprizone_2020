@@ -5,3 +5,6 @@ Bulk RNA-Seq analysis of control and remyelinating hGPCs in vivo
 
 [Full R Analysis Markdown](https://github.com/CTNGoldmanLab/Cuprizone_2020/blob/master/Cuprizone_Analysis_2020.md "Link to Analysis Markdown")
 
+![Graphical Abstract](https://ars.els-cdn.com/content/image/1-s2.0-S2211124720306112-fx1_lrg.jpg)
+
+
